@@ -21,11 +21,11 @@ const app = express();
 app.use(bodyParser.json());
 
 // Telegram bot (NO polling)
-const bot = new TelegramBot(TOKEN, { polling: true });
-// const bot = new TelegramBot(TOKEN);
+// const bot = new TelegramBot(TOKEN, { polling: true });
+const bot = new TelegramBot(TOKEN);
 
 // Set webhook
-// bot.setWebHook(`${URL}/bot${TOKEN}`);
+bot.setWebHook(`${URL}/bot${TOKEN}`);
 
 // Telegram webhook endpoint
 app.post(`/bot${TOKEN}`, (req, res) => {
