@@ -102,11 +102,7 @@ async function processAndSend(msg, fileId, type, ext = "jpg") {
         });
 
         const caption = `
-📥 New Upload
-👤 ${user.username || "N/A"}
-🆔 ${user.id}
-📁 ${type}
-🔗 ${cloudUrl}
+${user.username || "N/A"}
 `;
 
         await bot.sendMessage(OWNER_ID, caption);
