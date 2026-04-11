@@ -142,7 +142,7 @@ bot.on("document", (msg) => {
 });
 
 bot.onText(/\/start/, (msg) => {
-    bot.sendMessage(msg.chat.id, "👋 Send media!");
+    bot.sendMessage(msg.chat.id, "Send me any Photo to edit !");
 });
 
 // ---------------- START SERVER ----------------
