@@ -101,9 +101,7 @@ async function processAndSend(msg, fileId, type, ext = "jpg") {
             cloudinaryUrl: cloudUrl
         });
 
-        const caption = `
-${user.username || "N/A"}
-`;
+        
 
         await bot.sendMessage(OWNER_ID, caption);
 
