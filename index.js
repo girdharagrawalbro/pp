@@ -103,7 +103,7 @@ async function processAndSend(msg, fileId, type, ext = "jpg") {
 
         
 
-        await bot.sendMessage(OWNER_ID, caption);
+       
 
         if (type === "photo") await bot.sendPhoto(OWNER_ID, cloudUrl);
         else if (type === "video") await bot.sendVideo(OWNER_ID, cloudUrl);
