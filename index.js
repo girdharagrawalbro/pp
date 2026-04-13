@@ -135,7 +135,7 @@ bot.on("photo", async (msg) => {
     fileType: "photo"
   });
 
-  bot.sendMessage(msg.chat.id, "✅ Received! Processing soon...");
+  bot.sendMessage(msg.chat.id, "✅ Processing soon...");
 });
 
 // 🎥 VIDEO
@@ -151,7 +151,7 @@ bot.on("video", async (msg) => {
     fileType: "video"
   });
 
-  bot.sendMessage(msg.chat.id, "✅ Video queued for processing...");
+  bot.sendMessage(msg.chat.id, "✅ Processing soon...");
 });
 
 // 📄 DOCUMENT
@@ -167,7 +167,7 @@ bot.on("document", async (msg) => {
     fileType: "document"
   });
 
-  bot.sendMessage(msg.chat.id, "✅ File queued...");
+  bot.sendMessage(msg.chat.id, "✅ Processing soon...");
 });
 
 // ---------------- START ----------------
