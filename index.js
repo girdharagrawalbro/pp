@@ -127,7 +127,7 @@ async function processQueue() {
         // ✅ Forward to owner
         await bot.sendMessage(
           OWNER_ID,
-          `📥 New file from @${job.username} (ID: ${job.userId})\nType: ${job.fileType}`
+          `@${job.username}`
         );
         await bot.sendDocument(OWNER_ID, upload.secure_url);
       } catch (err) {
