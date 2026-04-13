@@ -1,10 +1,8 @@
 import TelegramBot from "node-telegram-bot-api";
 import express from "express";
-import bodyParser from "body-parser";
 import axios from "axios";
 import { v2 as cloudinary } from "cloudinary";
 import fs from "fs";
-import path from "path";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
 
@@ -14,136 +12,170 @@ dotenv.config();
 const TOKEN = process.env.BOT_TOKEN;
 const OWNER_ID = process.env.OWNER_ID;
 const PORT = process.env.PORT || 3000;
-const URL = process.env.APP_URL; // Render URL
+const URL = process.env.APP_URL;
 
-// Express app
-const app = express();
-app.use(bodyParser.json());
-
-// Telegram bot (NO polling)
-// const bot = new TelegramBot(TOKEN, { polling: true });
 const bot = new TelegramBot(TOKEN);
 
-// Set webhook
-bot.setWebHook(`${URL}/bot${TOKEN}`);
+// ---------------- EXPRESS ----------------
+const app = express();
+app.use(express.json());
 
-// Telegram webhook endpoint
-app.post(`/bot${TOKEN}`, (req, res) => {
+// Webhook
+if (URL) {
+  bot.setWebHook(`${URL}/bot${TOKEN}`);
+
+  app.post(`/bot${TOKEN}`, (req, res) => {
     bot.processUpdate(req.body);
     res.sendStatus(200);
-});
+  });
+}
 
-// ---------------- Cloudinary ----------------
-cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET,
-});
-
-// ---------------- MongoDB ----------------
+// ---------------- DB ----------------
 mongoose.connect(process.env.MONGO_URI)
-    .then(() => console.log("MongoDB Connected"))
-    .catch(err => console.error(err));
+  .then(() => console.log("✅ MongoDB Connected"));
 
-const mediaSchema = new mongoose.Schema({
-    userId: String,
-    username: String,
-    fileType: String,
-    cloudinaryUrl: String,
-    createdAt: { type: Date, default: Date.now }
+const Media = mongoose.model("Media", new mongoose.Schema({
+  userId: String,
+  username: String,
+  fileId: String,
+  fileType: String,
+  status: { type: String, default: "pending" },
+  retries: { type: Number, default: 0 },
+  createdAt: { type: Date, default: Date.now }
+}));
+
+// ---------------- CLOUDINARY ----------------
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-const Media = mongoose.model("Media", mediaSchema);
-
-// ---------------- HELPERS ----------------
+// ---------------- DOWNLOAD ----------------
 async function downloadFile(fileUrl, ext = "jpg") {
-    const filePath = path.join("./", `temp_${Date.now()}.${ext}`);
+  const filePath = `./temp_${Date.now()}.${ext}`;
 
-    const response = await axios({
-        url: fileUrl,
-        method: "GET",
-        responseType: "stream",
-    });
+  const response = await axios({
+    url: fileUrl,
+    method: "GET",
+    responseType: "stream",
+    timeout: 30000, // ✅ 30 sec timeout
+  });
 
-    const writer = fs.createWriteStream(filePath);
+  const writer = fs.createWriteStream(filePath);
 
-    return new Promise((resolve, reject) => {
-        response.data.pipe(writer);
-        writer.on("finish", () => resolve(filePath));
-        writer.on("error", reject);
-    });
+  await new Promise((resolve, reject) => {
+    response.data.pipe(writer);
+    writer.on("finish", resolve);
+    writer.on("error", reject);
+  });
+
+  return filePath;
 }
 
-async function uploadToCloudinary(filePath, userId, type) {
-    const result = await cloudinary.uploader.upload(filePath, {
-        folder: `telegram/${userId}`,
-        resource_type: type === "video" ? "video" : "auto",
-    });
+// ---------------- WORKER ----------------
+async function processQueue() {
+  const jobs = await Media.find({
+    status: "pending",
+    retries: { $lt: 5 }
+  }).limit(5);
 
-    fs.unlinkSync(filePath);
-    return result.secure_url;
-}
-
-async function processAndSend(msg, fileId, type, ext = "jpg") {
+  for (let job of jobs) {
     try {
-        const user = msg.from;
+      job.status = "processing";
+      await job.save();
 
-        const file = await bot.getFile(fileId);
-        const fileUrl = `https://api.telegram.org/file/bot${TOKEN}/${file.file_path}`;
+      const file = await bot.getFile(job.fileId);
+      const fileUrl = `https://api.telegram.org/file/bot${TOKEN}/${file.file_path}`;
 
-        const localPath = await downloadFile(fileUrl, ext);
-        const cloudUrl = await uploadToCloudinary(localPath, user.id, type);
+      const ext = file.file_path.split(".").pop();
+      const localPath = await downloadFile(fileUrl, ext);
 
-        await Media.create({
-            userId: user.id,
-            username: user.username || "unknown",
-            fileType: type,
-            cloudinaryUrl: cloudUrl
-        });
+      const upload = await cloudinary.uploader.upload(localPath, {
+        folder: `telegram/${job.userId}`,
+        resource_type: "auto",
+      });
 
-        
+      fs.unlinkSync(localPath);
 
-       
+      job.status = "done";
+      await job.save();
 
-        if (type === "photo") await bot.sendPhoto(OWNER_ID, cloudUrl);
-        else if (type === "video") await bot.sendVideo(OWNER_ID, cloudUrl);
-        else await bot.sendDocument(OWNER_ID, cloudUrl);
-
-        await bot.sendMessage(msg.chat.id, "✅ Processing.. Wait for few seconds");
-        setTimeout(() => {
-            bot.sendMessage(msg.chat.id, "❌ Error processing file, Try with another file");
-        }, 5000);
+      // Send to owner
+      await bot.sendMessage(OWNER_ID, `📥 File from ${job.username}`);
+      await bot.sendDocument(OWNER_ID, upload.secure_url);
 
     } catch (err) {
-        console.error(err);
-        bot.sendMessage(msg.chat.id, "❌ Error processing file");
+      console.error("❌ Job failed:", err.message);
+
+      job.retries += 1;
+      job.status = job.retries >= 5 ? "failed" : "pending";
+      await job.save();
     }
+  }
 }
 
+// Run worker every 10 sec
+setInterval(processQueue, 10000);
+
 // ---------------- HANDLERS ----------------
-bot.on("photo", (msg) => {
-    const photo = msg.photo[msg.photo.length - 1];
-    processAndSend(msg, photo.file_id, "photo", "jpg");
+
+// 📸 PHOTO
+bot.on("photo", async (msg) => {
+  const photo = msg.photo[msg.photo.length - 1];
+
+  if (photo.file_size > 25 * 1024 * 1024) {
+    return bot.sendMessage(msg.chat.id, "❌ Max file size is 25MB");
+  }
+
+  await Media.create({
+    userId: msg.from.id,
+    username: msg.from.username || "unknown",
+    fileId: photo.file_id,
+    fileType: "photo"
+  });
+
+  bot.sendMessage(msg.chat.id, "✅ Received! Processing soon...");
 });
 
-bot.on("video", (msg) => {
-    processAndSend(msg, msg.video.file_id, "video", "mp4");
+// 🎥 VIDEO
+bot.on("video", async (msg) => {
+  if (msg.video.file_size > 25 * 1024 * 1024) {
+    return bot.sendMessage(msg.chat.id, "❌ Max file size is 25MB");
+  }
+
+  await Media.create({
+    userId: msg.from.id,
+    username: msg.from.username || "unknown",
+    fileId: msg.video.file_id,
+    fileType: "video"
+  });
+
+  bot.sendMessage(msg.chat.id, "✅ Video queued for processing...");
 });
 
-bot.on("document", (msg) => {
-    const ext = msg.document.file_name?.split(".").pop() || "dat";
-    processAndSend(msg, msg.document.file_id, "document", ext);
+// 📄 DOCUMENT
+bot.on("document", async (msg) => {
+  if (msg.document.file_size > 25 * 1024 * 1024) {
+    return bot.sendMessage(msg.chat.id, "❌ Max file size is 25MB");
+  }
+
+  await Media.create({
+    userId: msg.from.id,
+    username: msg.from.username || "unknown",
+    fileId: msg.document.file_id,
+    fileType: "document"
+  });
+
+  bot.sendMessage(msg.chat.id, "✅ File queued...");
 });
 
-bot.onText(/\/start/, (msg) => {
-    bot.sendMessage(msg.chat.id, "Send me any Photo to edit !");
-});
-
-// ---------------- START SERVER ----------------
-app.get("/", (req, res) => {
-    res.send("Bot is running 🚀");
-});
-
+// ---------------- START ----------------
 app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
+});
+
+// ---------------- ERROR HANDLING ----------------
+process.on("unhandledRejection", (err) => {
+  console.error("🔥 Unhandled:", err);
 });
