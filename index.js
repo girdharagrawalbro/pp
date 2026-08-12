@@ -165,8 +165,8 @@ async function main() {
     }
   }, new NewMessage({}));
 
-  // Keep the process alive
-  await client.run();
+  // Keep the process alive indefinitely (event handlers stay active)
+  await new Promise(() => {});
 }
 
 // ---------------- GLOBAL ERROR HANDLING ----------------
