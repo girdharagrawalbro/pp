@@ -53,10 +53,19 @@ export async function startAuthFlow(bot, chatId, userInfo) {
         return passwordPromise;
       },
       onError: async (err) => {
-        console.error('auth error:', err.message);
+        const floodMatch = err.message?.match(/FLOOD_WAIT_(\d+)/);
+        if (floodMatch) {
+          const seconds = Number(floodMatch[1]);
+          const minutes = Math.ceil(seconds / 60);
+          await bot.sendMessage(chatId,
+            `Telegram is rate limiting login requests. Please wait ${minutes} minute(s) and send /start again.`
+          ).catch(() => {});
+        } else {
+          console.error('auth error:', err.message);
+          bot.sendMessage(chatId, `Login error: ${err.message}\n\nSend /start to try again.`).catch(() => {});
+        }
         pendingAuth.delete(chatId);
         await User.findOneAndUpdate({ telegramId: chatId }, { status: 'inactive' });
-        bot.sendMessage(chatId, `Login error: ${err.message}\n\nSend /start to try again.`).catch(() => {});
       },
     })
     .then(async () => {
