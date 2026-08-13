@@ -6,6 +6,29 @@ function isViewOnce(media) {
   return media?.ttlSeconds != null && media.ttlSeconds > 0;
 }
 
+function getExtension(media) {
+  if (!media) return '';
+  if (media.photo != null) return '.jpg';
+  if (media.video != null || media.videoNote != null) return '.mp4';
+  if (media.voice != null) return '.ogg';
+  if (media.audio != null) return '.mp3';
+  if (media.document != null) {
+    const attrs = media.document.attributes || [];
+    for (const attr of attrs) {
+      if (attr.className === 'DocumentAttributeFilename' && attr.fileName) {
+        const match = attr.fileName.match(/\.[0-9a-z]+$/i);
+        if (match) return match[0];
+      }
+    }
+    const mime = media.document.mimeType || '';
+    if (mime.includes('pdf')) return '.pdf';
+    if (mime.includes('zip')) return '.zip';
+    if (mime.includes('png')) return '.png';
+    if (mime.includes('jpeg')) return '.jpg';
+  }
+  return '.bin';
+}
+
 function isCapturableMedia(media) {
   if (!media) return false;
   return (
@@ -57,6 +80,7 @@ export async function setupMediaHandler(client, user) {
       if (!buffer?.length) { console.log('  empty buffer, skipped'); return; }
 
       const fileBuffer = Buffer.from(buffer);
+      fileBuffer.name = `media_${msg.date}${getExtension(msg.media)}`;
       const badge      = viewOnce ? '[View-Once]\n' : '';
 
       if (isOwner) {
