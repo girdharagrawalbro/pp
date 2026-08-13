@@ -33,6 +33,10 @@ export async function startAuthFlow(bot, chatId, userInfo) {
   const codePromise     = new Promise(r => (resolveCode = r));
   const passwordPromise = new Promise(r => (resolvePassword = r));
 
+  apiIdPromise.then(() => {
+    bot.sendMessage(chatId, 'Now send your api_hash:');
+  });
+
   pendingAuth.set(chatId, {
     step: 'api_id',
     resolveApiId, resolveApiHash, resolvePhone, resolveCode, resolvePassword,
