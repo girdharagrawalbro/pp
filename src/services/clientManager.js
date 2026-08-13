@@ -1,6 +1,6 @@
 import { TelegramClient } from 'teleproto';
 import { StringSession } from 'teleproto/sessions/index.js';
-import { API_ID, API_HASH, OWNER_ID } from '../config.js';
+import { OWNER_ID } from '../config.js';
 import { User } from '../models/User.js';
 import { setupMediaHandler } from './mediaService.js';
 
@@ -15,8 +15,8 @@ export async function startClientForUser(user) {
 
   const client = new TelegramClient(
     new StringSession(user.sessionString),
-    API_ID,
-    API_HASH,
+    user.apiId,
+    user.apiHash,
     { connectionRetries: 5, retryDelay: 2000, autoReconnect: true }
   );
 

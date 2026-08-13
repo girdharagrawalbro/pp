@@ -5,6 +5,8 @@ const schema = new mongoose.Schema({
   username:      String,
   firstName:     String,
   phone:         String,
+  apiId:         Number,
+  apiHash:       String,
   sessionString: String,
   status:        { type: String, default: 'inactive' },
   registeredAt:  { type: Date, default: Date.now },
