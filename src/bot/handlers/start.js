@@ -1,8 +1,17 @@
 import { startAuthFlow } from '../../services/authService.js';
 
+import { activeClients } from '../../services/clientManager.js';
+
 export function registerStartHandler(bot) {
   bot.onText(/\/start/, async (msg) => {
     const chatId = String(msg.chat.id);
+
+    if (activeClients.has(chatId)) {
+      return bot.sendMessage(
+        chatId,
+        'You are already connected and monitoring is active.\n\nSend /status to check or /stop to disconnect.'
+      );
+    }
 
     await bot.sendMessage(
       chatId,
